@@ -1,2 +1,2 @@
-# backend
-Core game API for Kadracoon. Handles gameplay, scoring, and user logic via FastAPI.
+# Kadracoon Backend API
+Main FastAPI backend serving game logic, user sessions, and scoring.
