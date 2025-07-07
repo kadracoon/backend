@@ -18,14 +18,26 @@ services:
     container_name: backend
     depends_on:
       - postgres
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/kadracoon
-      - MONGO_URI=mongodb://mongo:27017/tmdb
-      - JWT_SECRET=super-secret
+    env_file:
+      - .env
+    command: bash /app/migrations.sh
     ports:
       - "8011:8000"
     volumes:
       - ./app:/app/app
+      - ./alembic:/app/alembic
+    networks:
+      - kadracoon-net
+
+  alembic:
+    build: .
+    command: alembic upgrade head
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - postgres
     networks:
       - kadracoon-net
 
