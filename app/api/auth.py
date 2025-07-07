@@ -5,7 +5,7 @@ from sqlalchemy.future import select
 from app.schemas.user import UserCreate, UserRead, UserLoginRequest, TokenResponse
 from app.models.user import User
 from app.core.db import get_async_session
-from app.core.security import verify_password, create_jwt_token, hash_password
+from app.core.security import verify_password, create_jwt_token, hash_password, get_current_user
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -40,3 +40,8 @@ async def login(payload: UserLoginRequest, db: AsyncSession = Depends(get_async_
 
     token = create_jwt_token({"sub": str(user.id)})
     return TokenResponse(access_token=token)
+
+
+@router.get("/me", response_model=UserRead)
+async def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
