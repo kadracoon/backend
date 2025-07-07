@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: backend-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: kadracoon
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - kadracoon-net
+
+  web:
+    build: .
+    container_name: backend
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/kadracoon
+      - MONGO_URI=mongodb://mongo:27017/tmdb
+      - JWT_SECRET=super-secret
+    ports:
+      - "8011:8000"
+    volumes:
+      - ./app:/app/app
+    networks:
+      - kadracoon-net
+
+volumes:
+  pgdata:
+
+networks:
+  kadracoon-net:
+    external: true
