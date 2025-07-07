@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from app.api import auth
 from app.core.mongo import mongo_db
 
 # from app.api.auth import router as auth_router
@@ -13,6 +14,8 @@ app = FastAPI(
     title="Kadracoon Backend",
     version="0.1.0"
 )
+
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
 
 
 @app.get("/")
