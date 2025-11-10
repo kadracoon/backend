@@ -1,16 +1,12 @@
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import declarative_base
-from app.core.config import settings
-from fastapi import Depends
+import asyncpg
+from app.core.config import PG_DSN
 
 
-Base = declarative_base()
-
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
-
-AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+_pool = None
 
 
-async def get_async_session() -> AsyncSession:
-    async with AsyncSessionLocal() as session:
-        yield session
+async def get_pool():
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(dsn=PG_DSN, min_size=1, max_size=10)
+    return _pool
