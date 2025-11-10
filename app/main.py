@@ -2,8 +2,11 @@ import os
 
 from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
+from app.core.db import get_pool
+from app.db.sql import DDL
 
-from app.api import auth
+
+# from app.api import auth
 from app.core.mongo import mongo_db
 
 # from app.api.auth import router as auth_router
@@ -15,12 +18,19 @@ app = FastAPI(
     version="0.1.0"
 )
 
-app.include_router(auth.router, prefix="/auth", tags=["auth"])
+# app.include_router(auth.router, prefix="/auth", tags=["auth"])
 
 
 @app.get("/")
 async def root():
     return {"message": "Hello, Kadracoon!"}
+
+
+@app.on_event("startup")
+async def startup():
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(DDL)
 
 
 @app.get("/ping-mongo")
