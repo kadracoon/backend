@@ -19,7 +19,13 @@ target_metadata = Base.metadata
 
 # Используем переменную окружения ALEMBIC_DATABASE_URL
 def get_url():
-    return os.getenv("ALEMBIC_DATABASE_URL")
+    url = os.getenv("ALEMBIC_DATABASE_URL")
+    if not url:
+        url = os.getenv("PG_DSN")
+    if not url:
+        raise RuntimeError("ALEMBIC_DATABASE_URL or PG_DSN must be set")
+    return url
+
 
 
 def run_migrations_offline():
