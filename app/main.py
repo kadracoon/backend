@@ -2,13 +2,13 @@ import os
 
 from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
-from app.core.db import get_pool
-from app.db.sql import DDL
-from app.api import sets as sets_api
-from app.api import game as game_api
 
-# from app.api import auth
+from app.api import collections
+from app.api import game as game_api
+from app.api import sets as sets_api
+from app.core.db import get_pool
 from app.core.mongo import mongo_db
+from app.db.sql import DDL
 
 # from app.api.auth import router as auth_router
 # from app.api.game import router as game_router
@@ -20,8 +20,9 @@ app = FastAPI(
 )
 
 # app.include_router(auth.router, prefix="/auth", tags=["auth"])
-app.include_router(sets_api.router)
-app.include_router(game_api.router)
+app.include_router(collections.router)
+# app.include_router(game_api.router)
+# app.include_router(sets_api.router)
 
 
 @app.get("/")
