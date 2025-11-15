@@ -6,13 +6,18 @@ import random
 import time
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.collection_models import CollectionVersion, CollectionItem
 from app.models.game import Game, GameRound
 from app.services.tmdb_sync_client import get_movie
 from app.services.round_builder import pick_frame_paths, choose_distractors, build_options
+
+
+class AnswerError(Exception):
+    """Для понятных ошибок ответа (не найдено, уже отвечено и т.д.)."""
+    pass
 
 
 async def create_game_from_collection(
@@ -105,3 +110,69 @@ async def create_game_from_collection(
     await session.commit()
     await session.refresh(game)
     return game
+
+
+async def answer_round(
+    session: AsyncSession,
+    *,
+    game_id: int,
+    ord: int,
+    answer_index: int,
+) -> tuple[Game, GameRound, bool]:
+    """
+    Обрабатывает ответ на раунд.
+    Возвращает (game, round, finished_now).
+
+    finished_now == True, если после этого ответа игра стала завершённой.
+    """
+    game = await session.get(Game, game_id)
+    if not game:
+        raise AnswerError("Game not found")
+
+    gr = await session.scalar(
+        select(GameRound).where(
+            GameRound.game_id == game_id,
+            GameRound.ord == ord,
+        )
+    )
+    if not gr:
+        raise AnswerError("Round not found")
+
+    # если уже отвечено — просто возвращаем текущее состояние (без модификаций)
+    if gr.answered_index is not None:
+        return game, gr, (game.finished_at is not None)
+
+    # валидация индекса
+    if answer_index < 0 or answer_index >= len(gr.options):
+        raise AnswerError("Invalid answer index")
+
+    # проставляем ответ
+    gr.answered_index = answer_index
+    gr.is_correct = (answer_index == gr.correct_index)
+    gr.answered_at = datetime.utcnow()
+
+    # простое правило: +1 очко за правильный ответ
+    if gr.is_correct:
+        game.score += 1
+
+    # проверяем, остались ли ещё неотвеченные раунды
+    res = await session.execute(
+        select(func.count())
+        .select_from(GameRound)
+        .where(
+            GameRound.game_id == game_id,
+            GameRound.answered_index.is_(None),
+        )
+    )
+    remaining = res.scalar_one()
+
+    finished_now = False
+    if remaining == 0 and game.finished_at is None:
+        game.finished_at = datetime.utcnow()
+        finished_now = True
+
+    await session.commit()
+    await session.refresh(game)
+    await session.refresh(gr)
+
+    return game, gr, finished_now
