@@ -91,21 +91,74 @@ async def get_collection(collection_id: int, session: AsyncSession = Depends(get
 
 @router.get("/{collection_id}/versions")
 async def list_versions(collection_id: int, session: AsyncSession = Depends(get_session)):
-    rows = (await session.execute(
-        select(CollectionVersion).where(CollectionVersion.collection_id == collection_id).order_by(CollectionVersion.version.desc())
-    )).scalars().all()
-    return [
-        {"id": v.id, "version": v.version, "size": v.size, "compiled_at": v.compiled_at, "status": v.status}
-        for v in rows
-    ]
+    rows = await session.execute(
+        select(CollectionVersion)
+        .where(CollectionVersion.collection_id == collection_id)
+        .order_by(CollectionVersion.version)
+    )
+    versions = rows.scalars().all()
+    return [{"id": v.id, "version": v.version, "size": v.size, "status": v.status} for v in versions]
 
 
-@router.get("/versions/{version_id}/items")
-async def get_version_items(version_id: int, session: AsyncSession = Depends(get_session)):
-    v = (await session.execute(select(CollectionVersion).where(CollectionVersion.id == version_id))).scalar_one_or_none()
+@router.get("/{collection_id}/versions/latest")
+async def get_latest_version(collection_id: int, session: AsyncSession = Depends(get_session)):
+    row = await session.execute(
+        select(CollectionVersion)
+        .where(CollectionVersion.collection_id == collection_id)
+        .where(CollectionVersion.status == "published")
+        .order_by(CollectionVersion.version.desc())
+        .limit(1)
+    )
+    v = row.scalar_one_or_none()
     if not v:
-        raise HTTPException(404, "version not found")
-    items = (await session.execute(
-        select(CollectionItem).where(CollectionItem.version_id == version_id).order_by(CollectionItem.ord)
-    )).scalars().all()
-    return {"version_id": v.id, "size": v.size, "items": [{"ord": it.ord, "tmdb_id": it.tmdb_id, "_type": it._type} for it in items]}
+        raise HTTPException(404, "No versions for this collection")
+    return {"id": v.id, "version": v.version, "size": v.size}
+
+
+@router.get("/{collection_id}/versions/{version}")
+async def get_version(collection_id: int, version: int, session: AsyncSession = Depends(get_session)):
+    v = await session.scalar(
+        select(CollectionVersion).where(
+            CollectionVersion.version == version,
+            CollectionVersion.collection_id == collection_id
+        )
+    )
+    if not v:
+        raise HTTPException(404, "Version not found for this collection")
+    return {"id": v.id, "version": v.version, "size": v.size}
+
+
+@router.get("/{collection_id}/versions/{version}/items")
+async def get_version_items(
+    collection_id: int,
+    version: int,
+    session: AsyncSession = Depends(get_session),
+):
+    # 1. валидируем, что такая версия у коллекции есть
+    v = await session.scalar(
+        select(CollectionVersion).where(
+            CollectionVersion.collection_id == collection_id,
+            CollectionVersion.version == version,
+        )
+    )
+    if not v:
+        raise HTTPException(404, "Version not found for this collection")
+
+    # 2. берём items по PK версии (v.id), а не по номеру версии
+    rows = await session.execute(
+        select(CollectionItem)
+        .where(CollectionItem.version_id == v.id)
+        .order_by(CollectionItem.ord)
+    )
+    items = rows.scalars().all()
+
+    return {
+        "collection_id": collection_id,
+        "version": version,
+        "version_id": v.id,  # на всякий случай отдаём и PK
+        "size": v.size,
+        "items": [
+            {"ord": i.ord, "tmdb_id": i.tmdb_id, "_type": i._type}
+            for i in items
+        ],
+    }

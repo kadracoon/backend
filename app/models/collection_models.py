@@ -1,3 +1,5 @@
+from typing import Any
+
 from datetime import datetime
 from sqlalchemy import Integer, String, Text, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -28,6 +30,9 @@ class CollectionVersion(Base):
     size: Mapped[int] = mapped_column(Integer)
     compiled_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     seed: Mapped[int | None] = mapped_column(Integer, nullable=True)  # для случайностей/перемешиваний
+
+    rule: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
     rule_overrides_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # доп. изменения к базовому правилу
     status: Mapped[str] = mapped_column(String(20), default="published")  # draft|published|archived
 

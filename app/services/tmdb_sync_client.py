@@ -1,4 +1,6 @@
-import os, httpx
+import os
+import httpx
+from typing import Any, Dict, List, Optional
 
 
 TMDB_SYNC_URL = os.getenv("TMDB_SYNC_URL", "http://tmdb-sync:8000")
@@ -23,7 +25,7 @@ async def search_movies(
     year_from: int | None = None,
     year_to: int | None = None,
     is_animated: bool | None = None,
-    sort_by: str = "vote_count",   # мы хотим уметь сортировать и по голосам
+    sort_by: str = "vote_count",
     order: str = "desc",
     limit: int = 100,
     skip: int = 0,
@@ -33,7 +35,7 @@ async def search_movies(
         "/movies/search",
         {
             "genre_id": genre_id,
-            "country_code": country_code,  # ВАЖНО: не "country"
+            "country_code": country_code,
             "year_from": year_from,
             "year_to": year_to,
             "is_animated": is_animated,
@@ -41,6 +43,15 @@ async def search_movies(
             "sort_by": sort_by,
             "order": order,
             "limit": limit,
-            "skip": skip,                  # хотим постраничность
+            "skip": skip,
         },
     )
+
+
+async def get_movie(tmdb_id: int, _type: str = "movie") -> Dict[str, Any]:
+    return await tmdb_get(f"/movies/{tmdb_id}", {"_type": _type})
+
+
+async def get_frames(tmdb_id: int, _type: str = "movie") -> List[Dict[str, Any]]:
+    data = await tmdb_get(f"/movies/{tmdb_id}/frames", {"_type": _type})
+    return data.get("frames", [])
