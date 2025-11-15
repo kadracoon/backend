@@ -20,6 +20,7 @@ async def tmdb_get(path: str, params: dict | None = None):
 
 async def search_movies(
     *,
+    _type: str | None = None,
     genre_id: int | None = None,
     country_code: str | None = None,
     year_from: int | None = None,
@@ -29,23 +30,22 @@ async def search_movies(
     order: str = "desc",
     limit: int = 100,
     skip: int = 0,
-    _type: str = "movie",
 ):
-    return await tmdb_get(
-        "/movies/search",
-        {
-            "genre_id": genre_id,
-            "country_code": country_code,
-            "year_from": year_from,
-            "year_to": year_to,
-            "is_animated": is_animated,
-            "_type": _type,
-            "sort_by": sort_by,
-            "order": order,
-            "limit": limit,
-            "skip": skip,
-        },
-    )
+    params = {
+        "_type": _type,
+        "genre_id": genre_id,
+        "country_code": country_code,
+        "year_from": year_from,
+        "year_to": year_to,
+        "is_animated": is_animated,
+        "sort_by": sort_by,
+        "order": order,
+        "limit": limit,
+        "skip": skip,
+    }
+    # выкидываем None, чтобы не смущать FastAPI
+    params = {k: v for k, v in params.items() if v is not None}
+    return await tmdb_get("/movies/search", params)
 
 
 async def get_movie(tmdb_id: int, _type: str = "movie") -> Dict[str, Any]:
@@ -55,3 +55,4 @@ async def get_movie(tmdb_id: int, _type: str = "movie") -> Dict[str, Any]:
 async def get_frames(tmdb_id: int, _type: str = "movie") -> List[Dict[str, Any]]:
     data = await tmdb_get(f"/movies/{tmdb_id}/frames", {"_type": _type})
     return data.get("frames", [])
+

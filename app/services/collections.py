@@ -7,16 +7,20 @@ from app.services.tmdb_sync_client import search_movies
 import math
 
 
-DEFAULT_RULE = {
+DEFAULT_RULE: Dict[str, Any] = {
     "filters": {
-        "year_from": None, "year_to": None,
-        "genre_ids": [],           # список или один id
+        "type_": "movie",     # movie|tv
+        "year_from": None,
+        "year_to": None,
+        "genre_ids": [],      # список id
         "country": None,
         "is_animated": None,
-        "_type": "movie",          # movie|tv
     },
-    "sort": {"by": "vote_count", "order": "desc"},
-    "limit": 100
+    "sort": {
+        "by": "vote_count",
+        "order": "desc",
+    },
+    "limit": 100,
 }
 
 
@@ -37,22 +41,34 @@ def _apply_overrides(rule: Dict[str, Any], overrides: Optional[Dict[str, Any]]) 
 
 
 def merge_rules(base: dict, overrides: dict | None) -> dict:
-    if not overrides: return base
+    """Аккуратно совмещаем базовое правило и overrides (filters/sort/limit)."""
+    if not overrides:
+        return base
+
     out = {**base}
-    bf, of = base.get("filters", {}), (overrides.get("filters", {}) if overrides else {})
-    bs, os_ = base.get("sort", {}), (overrides.get("sort", {}) if overrides else {})
+
+    bf = base.get("filters", {}) or {}
+    of = overrides.get("filters", {}) or {}
     out["filters"] = {**bf, **of}
+
+    bs = base.get("sort", {}) or {}
+    os_ = overrides.get("sort", {}) or {}
     out["sort"] = {**bs, **os_}
-    if "limit" in overrides: out["limit"] = overrides["limit"]
+
+    if "limit" in overrides and overrides["limit"]:
+        out["limit"] = overrides["limit"]
+
     return out
 
 
 async def compute_next_version(session: AsyncSession, collection_id: int) -> int:
     row = await session.execute(
-        select(CollectionVersion.version).where(CollectionVersion.collection_id == collection_id).order_by(CollectionVersion.version.desc()).limit(1)
+        select(func.max(CollectionVersion.version)).where(
+            CollectionVersion.collection_id == collection_id
+        )
     )
     v = row.scalar_one_or_none()
-    return 1 if v is None else (v + 1)
+    return 1 if v is None else v + 1
 
 
 async def materialize_collection(
@@ -63,23 +79,51 @@ async def materialize_collection(
 ) -> int:
     """
     Создаём новую версию коллекции и наполняем collection_items.
-    Возвращаем id версии.
+    Возвращаем PK версии (CollectionVersion.id).
     """
 
-    # 1. Базовое правило берём из collection.rule_json
-    base_rule: Dict[str, Any] = collection.rule_json or {}
-    rule = _apply_overrides(base_rule, overrides)
+    # 1. Базовое правило: из коллекции или дефолт
+    base_rule: Dict[str, Any] = collection.rule_json or DEFAULT_RULE
+    rule = merge_rules(base_rule, overrides)
 
     filters: Dict[str, Any] = rule.get("filters") or {}
     sort: Dict[str, Any] = rule.get("sort") or {}
     limit: int = int(rule.get("limit") or 100)
 
-    # фильтры
+    # --- НОРМАЛИЗАЦИЯ ФИЛЬТРОВ ОТ СВЭГГЕРА ---
+
+    # type_ — оставляем как есть, но по умолчанию movie
     type_ = filters.get("type_") or "movie"
+
     year_from = filters.get("year_from")
     year_to = filters.get("year_to")
-    genre_ids = filters.get("genre_ids") or []
+
+    # genre_ids могут прилететь как:
+    # - None
+    # - 0
+    # - [0]
+    # - int
+    # - [int, int, ...]
+    genre_ids = filters.get("genre_ids")
+
+    if isinstance(genre_ids, int):
+        # если 0 — считаем "нет фильтра", иначе заворачиваем в список
+        genre_ids = [] if genre_ids == 0 else [genre_ids]
+    elif genre_ids in (None, 0, [0]):
+        genre_ids = []
+    elif isinstance(genre_ids, list):
+        # выкидываем нули и неинты
+        genre_ids = [g for g in genre_ids if isinstance(g, int) and g != 0]
+    else:
+        # всё остальное — в помойку
+        genre_ids = []
+
+    # country может прилететь как "string" из примера
     country = filters.get("country")
+    if isinstance(country, str):
+        if country.strip() == "" or country.strip().lower() in {"string", "country"}:
+            country = None
+
     is_animated = filters.get("is_animated")
 
     genre_id = genre_ids[0] if genre_ids else None
@@ -100,51 +144,52 @@ async def materialize_collection(
         limit=limit,
         skip=0,
     )
-    movies = resp.get("items") or resp.get("results") or []
+
+    # tmdb-sync отдаёт {"items": [...]}
+    raw_items = resp.get("items") if isinstance(resp, dict) else resp
+    movies = raw_items or []
     size = len(movies)
 
-    # 3. Вычисляем номер версии: max(version)+1
-    res = await session.execute(
-        select(func.max(CollectionVersion.version)).where(
-            CollectionVersion.collection_id == collection.id
-        )
-    )
-    current_max = res.scalar() or 0
-    next_version = current_max + 1
+    # 3. Номер логической версии
+    next_version = await compute_next_version(session, collection.id)
 
-    # 4. Создаём CollectionVersion
+    # 4. Создаём запись версии
     version = CollectionVersion(
         collection_id=collection.id,
         version=next_version,
         size=size,
         seed=seed,
-        rule=rule,                     # финальное правило для этой версии
-        rule_overrides_json=overrides, # что применили поверх base_rule
+        # сохраняем фактически использованное правило,
+        # чтобы потом было понятно, по чему собрали
+        rule=rule,
+        rule_overrides_json=overrides or {},
         status="published",
     )
     session.add(version)
-    await session.flush()  # нужен id версии
+    await session.flush()  # нужен version.id (PK)
 
-    # 5. На всякий случай чистим items для этой версии (если вдруг перегенерация)
+    # 5. На всякий случай чистим items для этой версии
     await session.execute(
         delete(CollectionItem).where(CollectionItem.version_id == version.id)
     )
 
-    # 6. Наполняем items
-    items_to_add = []
+    # 6. Наполняем items, если есть фильмы
+    items_to_add: list[CollectionItem] = []
     for idx, m in enumerate(movies, start=1):
         ci = CollectionItem(
-            version_id=version.id,
+            version_id=version.id,  # ВАЖНО: именно PK версии
             ord=idx,
             tmdb_id=m["id"],
-            _type=type_,  # ВАЖНО: именно _type, как в модели
+            _type=type_,
         )
         items_to_add.append(ci)
 
-    session.add_all(items_to_add)
+    if items_to_add:
+        session.add_all(items_to_add)
 
-    # 7. Коммит и возврат id версии
+    # на всякий случай синхронизируем size с фактическим количеством
+    version.size = len(items_to_add)
+
     await session.commit()
+    await session.refresh(version)
     return version.id
-
-

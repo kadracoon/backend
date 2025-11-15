@@ -54,8 +54,10 @@ async def create_game_from_collection(
         seed = int(time.time())
     rng = random.Random(seed)
 
-    # пока просто берём первые n_rounds, позже можно перемешать
-    selected = list(items[:n_rounds])
+    # перемешиваем порядок элементов версии и берём первые n_rounds
+    items_shuffled = list(items)
+    rng.shuffle(items_shuffled)
+    selected = items_shuffled[:n_rounds]
 
     game = Game(
         version_id=version_id,

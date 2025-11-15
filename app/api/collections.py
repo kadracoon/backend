@@ -44,6 +44,22 @@ class CollectionCreateIn(BaseModel):
     rule: RuleIn = Field(default_factory=RuleIn)
 
 
+@router.get("")
+async def list_collections(session: AsyncSession = Depends(get_session)):
+    rows = await session.execute(select(Collection))
+    collections = rows.scalars().all()
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "slug": c.slug,
+            "description": c.description,
+            "type": c.type,
+        }
+        for c in collections
+    ]
+
+
 @router.post("")
 async def create_collection(payload: CollectionCreateIn, session: AsyncSession = Depends(get_session)):
     # slug
